@@ -80,7 +80,7 @@ def _instantiate_tsvit(conf):
 def _instantiate_galileo(conf):
     import sys
     sys.path.insert(0, str(ROOT))
-    from src.galileo_segmentation import GalileoForSegmentation
+    from src.galileo.galileo_segmentation import GalileoForSegmentation
     encoder_path = str(ROOT / conf["galileo_encoder_path"])
     return GalileoForSegmentation(
         num_classes=conf["num_classes"],
