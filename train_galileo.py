@@ -4,8 +4,8 @@ Train Galileo Foundation Model Baseline for T3S Crop Mapping
 =============================================================
 
 Standalone training script for the Galileo (Tseng et al. 2025) baseline.
-Uses the official Galileo encoder from third_party/galileo/ with a thin
-segmentation wrapper (src/galileo_segmentation.py).
+Uses the official Galileo encoder from src/galileo/ with a thin
+segmentation wrapper (src/galileo/galileo_segmentation.py).
 
 Usage (2 GPUs):
   CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 --master_port=13346 train_galileo.py \\
