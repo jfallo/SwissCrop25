@@ -65,6 +65,7 @@ slurm-output/
 
 # Misc internal files
 texput.log
+generate_tile_index.py
 
 # Presentations
 *.pptx
