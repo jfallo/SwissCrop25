@@ -3,7 +3,7 @@ From: condaforge/miniforge3:latest
 
 %files
     ./env.yml /env.yml
-    ./SwissCrop25 /SwissCrop25
+    ./requirements.txt /requirements.txt
 
 %post
     mamba env create --yes -f /env.yml
