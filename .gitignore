@@ -24,6 +24,7 @@ core_*
 # Data files
 *.tif
 *.tar.gz
+*.parquet
 
 # Jupyter
 .ipynb_checkpoints/
@@ -69,3 +70,6 @@ generate_tile_index.py
 
 # Presentations
 *.pptx
+
+# Scratch work
+scratch/

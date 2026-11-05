@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+%files
+    ./env_preprocess.yml /env_preprocess.yml
+    ./SwissCrop25 /SwissCrop25
+
+%post
+    mamba env create --yes -f /env_preprocess.yml
+    mamba clean --all -f -y
+
+%environment
+    export PATH="/opt/conda/envs/venv_preprocess/bin:$PATH"
+
+%runscript
+    exec python "$@"
