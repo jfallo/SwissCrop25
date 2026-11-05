@@ -22,6 +22,7 @@ storage/**/*.ckpt
 core_*
 
 # Data files
+*.DS_Store
 *.tif
 *.tar.gz
 *.parquet
