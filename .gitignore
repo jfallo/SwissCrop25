@@ -37,6 +37,7 @@ SwissCrop/
 # Local environment / containers
 .venv
 *.sqfs
+*.sif
 
 # Claude Code memory (local only)
 .claude/
