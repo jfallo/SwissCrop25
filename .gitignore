@@ -26,6 +26,10 @@ core_*
 *.tif
 *.tar.gz
 *.parquet
+*.tar
+*.tar.sha256
+*.npy
+*.json
 
 # Jupyter
 .ipynb_checkpoints/
@@ -38,6 +42,7 @@ SwissCrop/
 .venv
 *.sqfs
 *.sif
+venv/
 
 # Claude Code memory (local only)
 .claude/
