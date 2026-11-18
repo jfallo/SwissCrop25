@@ -160,7 +160,7 @@ year   parcels     with px     overlay-flagged   observations rows   parcel_prev
 complete and uncorrupted from the dataset folder with:
 
 ```bash
-sha256sum -c SHA256SUMS
+sha256sum -c SwissCrop25-ParcelTS.tar.sha256
 ```
 
 ## Terms of use

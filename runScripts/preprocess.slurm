@@ -7,7 +7,11 @@
 #SBATCH --mem=48G
 #SBATCH --output=logs/%x_%j.out
 
+set -e
 module load apptainer
 
-cd $HOME/SwissCrop25
+cd $HOME/SwissCrop25/data
+sha256sum -c SwissCrop25-ParcelTS.tar.sha256
+
+cd ..
 apptainer exec conda.sif python ./preprocess.py
