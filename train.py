@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from dataset import ParcelDataset
-from src.tsvit.TSViTdense import TSViT
+from src.tsvit.TSViTcls import TSViT
 
 
 parser = argparse.ArgumentParser(description="TSViT baseline for T3S crop mapping")
@@ -154,7 +154,7 @@ def evaluate(model, loader, class_weights, args, device, num_classes):
         if x is None:
             continue
         
-        logits = model(x)[..., 0, 0]
+        logits = model(x)
         loss += F.cross_entropy(logits, y, weight= class_weights, ignore_index= args.ignore_index) * len(y)
         n += len(y)
 
@@ -184,7 +184,7 @@ def iterate(model, optimizer, scheduler, loader, class_weights, args, device, ep
 
         x, y = build_input(batch, device)
         if x is not None:
-            logits = model(x)[..., 0, 0]
+            logits = model(x)
             batch_loss = F.cross_entropy(logits, y, weight= class_weights, ignore_index= args.ignore_index)
             (batch_loss / args.accumulate_steps).backward()
             loss += batch_loss.detach()
