@@ -1,8 +1,4 @@
-# Model weights / large binaries
-galileo_weights/
-src/galileo/weights/**
-!src/galileo/weights/**/
-!src/galileo/weights/**/.gitkeep
+# model weights / large binaries
 *.pt
 *.pth
 *.ckpt
@@ -15,7 +11,7 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# Results / outputs
+# results / outputs
 storage/**/*.pth
 storage/**/*.pt
 storage/**/*.ckpt
@@ -34,11 +30,7 @@ core_*
 # Jupyter
 .ipynb_checkpoints/
 
-# HuggingFace dataset repos (separate remotes)
-SwissCrop25_hf/
-SwissCrop/
-
-# Local environment / containers
+# local environment / containers
 .venv
 *.sqfs
 *.sif
@@ -47,36 +39,36 @@ venv/
 # Claude Code memory (local only)
 .claude/
 
-# Third-party paper code (not part of this project)
-utae-paps/
-
 # IDE
 .vscode/
 
 # arXiv submission directory
 Lauber_2026_SwissCrop_ECCV26_TerraBytes_arxiv/
 
-# Paper directories (not for public repo)
+# paper directories (not for public repo)
 Lauber_2026_SwissCrop_ECCV26_TerraBytes/
 Lauber_2026_SwissCrop_ECCV26_TerraBytes_Proceedings/
 Lauber_2026_SwissCrop_ECCV26_TerraBytes_SM/
 Lauber_2026_Crop1990_report/
 
-# Internal documentation
+# internal documentation
 documentation/
 sbatchScripts/
 results/
 
-# Slurm logs
+# slurm logs
 slurm-*.out
 slurm-output/
 
-# Misc internal files
+# misc internal files
 texput.log
 generate_tile_index.py
 
-# Presentations
+# presentations
 *.pptx
 
-# Scratch work
+# scratch work
 scratch/
+
+# logs
+logs/*
