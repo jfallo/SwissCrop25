@@ -17,6 +17,6 @@ apptainer exec --nv conda.sif python train.py \
     --res_dir storage/baseline \
     --num_workers $((SLURM_CPUS_PER_TASK - 1)) \
     --use_temp_calendar --use_temp_subsampling \
-    --use_class_balance_loss \
+    --use_class_balance_loss --beta_class_balance 0.999 \
     --epochs 15 --batch_size 512 \
     --resume
