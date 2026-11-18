@@ -33,7 +33,7 @@ parser.add_argument('--scale_dim', type= int, default= 4)
 
 # data parameters
 parser.add_argument('--num_workers', type= int, default= 4)
-parser.add_argument('--cache_dir', type= str, default= 'data/processed')
+parser.add_argument('--cache_dir', type= str, default= 'data/cache')
 parser.add_argument('--train_years', type= int, nargs= '+', default= [2019, 2020, 2021, 2022, 2025])
 parser.add_argument('--val_years', type= int, nargs= '+', default= [2023])
 parser.add_argument('--test_years', type= int, nargs= '+', default= [2024])

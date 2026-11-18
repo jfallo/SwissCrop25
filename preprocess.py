@@ -300,7 +300,7 @@ if __name__ == "__main__":
                         default= ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'])
     parser.add_argument('--only_clear_px', action= 'store_true',
                         help= "Only include cloud-free observations.")
-    parser.add_argument('--out_dir', type= str, default= 'data/processed/',
+    parser.add_argument('--out_dir', type= str, default= 'data/cache/',
                         help= "Output directory for caches.")
     args = parser.parse_args()
     
