@@ -25,6 +25,7 @@ core_*
 *.tar
 *.tar.sha256
 *.npy
+data/*.json
 data/**/*.json
 
 # Jupyter

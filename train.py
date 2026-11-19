@@ -294,7 +294,7 @@ def main():
         print(f'resumed from epoch {start_epoch}', flush= True)
 
     
-    # ------ training ------------------------------------ #
+    # ------ Train ------------------------------------ #
     
     if not args.eval_only:
         for epoch in range(start_epoch, args.epochs):
@@ -312,16 +312,20 @@ def main():
             torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                         'scheduler': scheduler.state_dict(), 'epoch': epoch, 'best': best, 'history': history}, latest_path)
 
-    # ---- final evaluation with the best model ----
+
+    # ------ Evaluate best model ------------------------------------ #
+
     model.load_state_dict(torch.load(best_path, map_location= device))
-    results = {'history': history, 'best_' + args.select_metric: best}
-    results['val'] = evaluate(model, val_loader, class_weights, args, device, num_classes)
-    print('best model, val:  ' + format_res(results['val']), flush= True)
+    res = {'history': history, 'best_' + args.select_metric: best}
+    res['val'] = evaluate(model, val_loader, class_weights, args, device, num_classes)
+    print('best model, val: ' + format_res(res['val']), flush= True)
     if test_loader is not None:
-        results['test'] = evaluate(model, test_loader, class_weights, args, device, num_classes)
-        print('best model, test: ' + format_res(results['test']), flush= True)
+        res['test'] = evaluate(model, test_loader, class_weights, args, device, num_classes)
+        print('best model, test: ' + format_res(res['test']), flush= True)
     with open(os.path.join(args.res_dir, 'results.json'), 'w') as f:
-        json.dump(results, f, indent= 2)
+        json.dump(res, f, indent= 2)
+
+
 
 
 if __name__ == '__main__':
