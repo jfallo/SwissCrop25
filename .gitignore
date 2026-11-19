@@ -65,9 +65,6 @@ slurm-output/
 texput.log
 generate_tile_index.py
 
-# presentations
-*.pptx
-
 # scratch work
 scratch/
 
