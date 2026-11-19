@@ -1,0 +1,50 @@
+{
+  "years": [
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "labels": {
+    "source_col": "Crop_Label",
+    "background_label": 0,
+    "num_classes": 71
+  },
+  "filters": {
+    "keep_missing_climate_data": false,
+    "keep_missing_label": false
+  },
+  "acq_types": [
+    "clear",
+    "all"
+  ],
+  "bands": [
+    "B02",
+    "B03",
+    "B04",
+    "B05",
+    "B06",
+    "B07",
+    "B08",
+    "B8A",
+    "B11",
+    "B12"
+  ],
+  "t_var": "TabsD",
+  "t_base": 0.0,
+  "cl_data": [
+    "cgdd",
+    "cgdd_seasonal"
+  ],
+  "p_data": [
+    "parcel_id",
+    "n_px",
+    "mean_purity",
+    "overlay_flag",
+    "cell_idx",
+    "label"
+  ]
+}
