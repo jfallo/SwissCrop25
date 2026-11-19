@@ -14,9 +14,9 @@ cd $HOME/SwissCrop25
 export OMP_NUM_THREADS=1
 
 apptainer exec --nv conda.sif python train.py \
-    --res_dir storage/baseline \
+    --res_dir storage/baseline_beta_mid \
     --num_workers $((SLURM_CPUS_PER_TASK - 1)) \
     --use_temp_calendar --use_temp_subsampling \
-    --use_class_balance_loss --beta_class_balance 0.999 \
+    --use_class_balance_loss --beta_class_balance 0.9999 \
     --epochs 15 --batch_size 512 \
     --resume
