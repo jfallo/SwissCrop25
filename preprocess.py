@@ -153,14 +153,10 @@ def load_and_cache_year(tar, year, args, target_map, acq_types, s2_bands):
     p = p.merge(cells, on= [*cl_keys], how= 'left', validate= 'm:1')
     assert p['cell_idx'].notna().all()
     # get labels
-    p['label'] = p['lnf_code'].map(target_map).fillna(0).astype(np.int32)
+    p['label'] = p['lnf_code'].map(target_map).fillna(-1).astype(np.int32)
 
     # drop parcels and reindex
-    p = p[(p['drop_reason'] == 'none') & (p['n_px'] > 0)]
-    if not args.keep_missing_climate_data:
-        p = p[p['has_cl_data']]
-    if not args.keep_missing_label:
-        p = p[p['label'] > 0]
+    p = p[(p['drop_reason'] == 'none') & (p['n_px'] > 0) & (p['label'] != -1) & (p['has_cl_data'])]
     p = p.reset_index(drop= True)
     kept_ids = pa.array(p['parcel_id'].to_numpy(), type= pa.string())  # already unique since parcel_id is unique
     num_parcels = len(p)
@@ -263,10 +259,6 @@ def main(args):
             'background_label': 0,
             'num_classes': num_classes
         },
-        'filters': {
-            'keep_missing_climate_data': bool(args.keep_missing_climate_data),
-            'keep_missing_label': bool(args.keep_missing_label)
-        },
         'acq_types': acq_types,
         'bands': args.bands,
         't_var': args.t_var,
@@ -292,10 +284,6 @@ if __name__ == "__main__":
                         help= "Temperature reference variable.")
     parser.add_argument('--t_base', type= float, default= 0.0,
                         help= "Base temperature for computing GDD.")
-    parser.add_argument('--keep_missing_climate_data', action= 'store_true',
-                        help= "Keep parcels in grid cells with missing climate data.")
-    parser.add_argument('--keep_missing_label', action= 'store_true',
-                        help= "Keep parcels with missing crop label.")
     parser.add_argument('--bands', type= str, nargs= '+', 
                         default= ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'])
     parser.add_argument('--only_clear_px', action= 'store_true',
