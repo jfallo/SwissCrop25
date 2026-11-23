@@ -41,7 +41,7 @@ parser.add_argument('--acq_type', type= str, default= 'clear', choices= ['clear'
 parser.add_argument('--bands', type= str, nargs= '+', 
                     default= ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'])
 parser.add_argument('--temp_var', type= str, default= 'cgdd', choices= ['cgdd', 'cgdd_seasonal'])
-parser.add_argument('--ignore_index', type= int, default= 0)
+parser.add_argument('--ignore_index', type= int, default= None)
 parser.add_argument('--min_px', type= int, default= 1)
 parser.add_argument('--min_purity', type= float, default= 0.0)
 parser.add_argument('--drop_overlay', action= 'store_true')
@@ -64,7 +64,7 @@ parser.add_argument('--overwrite', action= 'store_true',
                     help= "Ignore existing checkpoints and start fresh.")
 parser.add_argument('--resume', action= 'store_true')
 parser.add_argument('--checkpoint_steps', type= int, default= 500)
-parser.add_argument('--epochs', type= int, default= 15)
+parser.add_argument('--epochs', type= int, default= 10)
 parser.add_argument('--batch_size', type= int, default= 512, 
                     help= "Parcels per GPU.")
 parser.add_argument('--debug_steps', type= int, default= None)
@@ -78,19 +78,19 @@ parser.add_argument('--weight_decay', type= float, default= 0.01)
 #parser.add_argument('--lr_reference_batch_size', type=int, default=0,
 #                    help='if >0: scale lr by effective_batch / this (the tile script uses 64 tiles); 0 = off')
 parser.add_argument('--val_every', type= int, default= 1)
-parser.add_argument('--select_metric', type= str, default= 'mIoU', choices= ['OA', 'IoU', 'mIoU', 'mF1'])
+parser.add_argument('--select_metric', type= str, default= 'mIoU', choices= ['OA', 'mIoU', 'mF1'])
 
 # misc parameters
 parser.add_argument('--rdm_seed', type= int, default= 6666)
 parser.add_argument('--seed', type= int, default= None)
 parser.add_argument('--device', type= str, default= 'cuda')
-parser.add_argument('--display_step', type= int, default= 200)
+parser.add_argument('--display_step', type= int, default= 500)
 parser.add_argument('--eval_only', action= 'store_true', 
                     help= "Skip training, test res_dir/model.pth")
 
 # loss parameters
 parser.add_argument('--use_class_balance_loss', action= 'store_true')
-parser.add_argument('--beta_class_balance', default= 0.99999, type= float)
+parser.add_argument('--beta_class_balance', default= 0.9999, type= float)
 parser.add_argument('--w_ce', default= 1.0, type= float)
 parser.add_argument('--w_focal', default= 0.0, type= float)
 parser.add_argument('--w_dice', default= 0.0, type= float)
@@ -103,9 +103,12 @@ parser.add_argument('--tversky_beta', default= 0.7, type= float)
 
 
 def build_input(batch, device):
-    """Builds batched input for TSViT from a dataset batch. Invalid observations are dropped.
+    """
+    Builds batched input for TSViT from a dataset batch. Invalid observations are dropped.
+    
     Returns:
-        torch.tensor: [B, T, 1, 1, C+1]"""
+        torch.tensor: (B, T, 1, 1, C+1)
+    """
     mask = batch['mask']
     keep = mask.any(dim= 1)
     if not keep.any():
@@ -121,15 +124,19 @@ def build_input(batch, device):
 
 
 def compute_metrics(confusion_matrix, ignore_index):
-    """Confusion matrix (rows = true, cols = predicted) -> OA, GIoU (= OA / (2 - OA)), mIoU, mF1.
-    mIoU and mF1 average over classes present in the ground truth."""
+    """Confusion matrix (rows = true, cols = predicted) -> OA, mIoU, mF1. mIoU and mF1 average over classes present in the ground truth."""
+    confusion_matrix = confusion_matrix.copy()
+    if ignore_index is not None:
+        confusion_matrix[ignore_index, :] = 0
+    
     tp = np.diag(confusion_matrix)
     fp = confusion_matrix.sum(axis= 0) - tp
     fn = confusion_matrix.sum(axis= 1) - tp
     support = confusion_matrix.sum(axis= 1)
 
     valid = support > 0
-    valid[ignore_index] = False
+    if ignore_index is not None:
+        valid[ignore_index] = False 
     if not valid.any():
         return {'OA': 0.0, 'IoU': 0.0, 'mIoU': 0.0, 'mF1': 0.0}
     
@@ -140,12 +147,16 @@ def compute_metrics(confusion_matrix, ignore_index):
     return {'OA': oa, 'IoU': oa / (2 - oa), 'mIoU': float(iou[valid].mean()), 'mF1': float(f1[valid].mean())}
 
 
+# TODO: ignore background label in confusion matrix, save confusion matrix (weight by n_px to compare against paper?)
 @torch.no_grad()
 def evaluate(model, loader, class_weights, args, device, num_classes):
+    ignore_index = args.ignore_index if args.ignore_index is not None else -100
     model.eval()
-    confusion_matrix = torch.zeros(num_classes**2, dtype= torch.float64, device= device)
-    
-    loss, n = torch.zeros((), device= device), 0
+
+    confusion_matrix    = torch.zeros(num_classes**2, dtype= torch.float64, device= device)
+    confusion_matrix_px = torch.zeros(num_classes**2, dtype= torch.float64, device= device)
+        
+    loss, norm = torch.zeros((), device= device), torch.zeros((), device= device)
     for step, batch in enumerate(loader):
         if args.debug_steps and step >= args.debug_steps:
             break
@@ -153,27 +164,37 @@ def evaluate(model, loader, class_weights, args, device, num_classes):
         x, y = build_input(batch, device)
         if x is None:
             continue
+        n_px = batch['n_px'][batch['mask'].any(dim= 1)].to(device)
         
         logits = model(x)
-        loss += F.cross_entropy(logits, y, weight= class_weights, ignore_index= args.ignore_index) * len(y)
-        n += len(y)
+        loss += F.cross_entropy(logits, y, weight= class_weights, ignore_index= ignore_index, reduction= 'sum')
 
-        preds = logits.argmax(dim= 1)
-        idxs = y * num_classes + preds
+        valid = (y != ignore_index)
+        norm += class_weights[y[valid]].sum() if class_weights is not None else valid.sum()
+
+        preds = logits.argmax(dim= 1)[valid]
+        idxs = y[valid] * num_classes + preds
         
         confusion_matrix += torch.bincount(idxs, minlength= num_classes**2)
+        confusion_matrix_px += torch.bincount(idxs, weights= n_px[valid], minlength= num_classes**2)
 
-    res = compute_metrics(confusion_matrix.view(num_classes, num_classes).cpu().numpy(), args.ignore_index)
-    res.update({'loss': float(loss) / max(n, 1), 'n': n})
+    confusion_matrix, confusion_matrix_px = (m.view(num_classes, num_classes).cpu().numpy() 
+                                             for m in (confusion_matrix, confusion_matrix_px))
+    
+    res = compute_metrics(confusion_matrix, args.ignore_index)
+    res.update({f'{key}_px': val for key, val in compute_metrics(confusion_matrix_px, args.ignore_index).items()})
+    res.update({'loss': float(loss / norm), 'n': float(confusion_matrix.sum())})
 
-    return res
+    return res, confusion_matrix, confusion_matrix_px
 
 
 def format_res(m):
-    return f"loss {m['loss']:.4f} | parcels {m['n']:,} | OA {m['OA']:.2%} mIoU {m['mIoU']:.2%} mF1 {m['mF1']:.2%}"
+    return (f"loss {m['loss']:.4f} | parcels {m['n']:,} | OA {m['OA']:.2%} mIoU {m['mIoU']:.2%} mF1 {m['mF1']:.2%} | "
+              + f"OA_px {m['OA_px']:.2%} mIoU_px {m['mIoU_px']:.2%} mF1_px {m['mF1_px']:.2%}")
 
     
 def iterate(model, optimizer, scheduler, loader, class_weights, args, device, epoch, batches_per_epoch):
+    ignore_index = args.ignore_index if args.ignore_index is not None else -100
     model.train()
     optimizer.zero_grad()
     
@@ -185,7 +206,7 @@ def iterate(model, optimizer, scheduler, loader, class_weights, args, device, ep
         x, y = build_input(batch, device)
         if x is not None:
             logits = model(x)
-            batch_loss = F.cross_entropy(logits, y, weight= class_weights, ignore_index= args.ignore_index)
+            batch_loss = F.cross_entropy(logits, y, weight= class_weights, ignore_index= ignore_index)
             (batch_loss / args.accumulate_steps).backward()
             loss += batch_loss.detach()
             n += 1
@@ -277,10 +298,24 @@ def main():
     
     batches_per_epoch = min(len(train_loader), args.debug_steps) if args.debug_steps else len(train_loader)
     total_steps = args.epochs * math.ceil(batches_per_epoch / args.accumulate_steps)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr= args.lr, total_steps= total_steps, pct_start= args.pct_start,
-        div_factor= args.lr / args.lr_start, final_div_factor= args.lr_start / args.lr_end,
-        cycle_momentum= False
+    # changed to tom's (before was almost identical)
+    warmup_steps = max(1, int(args.pct_start * total_steps))
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor= args.lr_start / args.lr,
+                end_factor= 1.0,
+                total_iters= warmup_steps,
+            ),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max= max(1, total_steps - warmup_steps),
+                eta_min= args.lr_end,
+            ),
+        ],
+        milestones= [warmup_steps],
     )
 
     latest_path, best_path = os.path.join(args.res_dir, 'model_latest.pth'), os.path.join(args.res_dir, 'model_best.pth')
@@ -303,7 +338,7 @@ def main():
                                  args, device, epoch, batches_per_epoch)
             print(f'epoch {epoch + 1}/{args.epochs} | train loss {train_loss:.4f} | {(time.time() - t0) / 60:.1f} min', flush= True)
             if (epoch + 1) % args.val_every == 0 or epoch + 1 == args.epochs:
-                val = evaluate(model, val_loader, class_weights, args, device, num_classes)
+                val, _, _ = evaluate(model, val_loader, class_weights, args, device, num_classes)
                 print('  val: ' + format_res(val), flush= True)
                 history.append({'epoch': epoch + 1, 'train_loss': train_loss, **val})
                 if val[args.select_metric] > best:
@@ -317,10 +352,14 @@ def main():
 
     model.load_state_dict(torch.load(best_path, map_location= device))
     res = {'history': history, 'best_' + args.select_metric: best}
-    res['val'] = evaluate(model, val_loader, class_weights, args, device, num_classes)
+    res['val'], val_cm, val_cm_px = evaluate(model, val_loader, class_weights, args, device, num_classes)
     print('best model, val: ' + format_res(res['val']), flush= True)
+    np.save(os.path.join(args.res_dir, 'val_confusion_matrix.npy'), val_cm)
+    np.save(os.path.join(args.res_dir, 'val_confusion_matrix_px.npy'), val_cm_px)
     if test_loader is not None:
-        res['test'] = evaluate(model, test_loader, class_weights, args, device, num_classes)
+        res['test'], test_cm, test_cm_px = evaluate(model, test_loader, class_weights, args, device, num_classes)
+        np.save(os.path.join(args.res_dir, 'test_confusion_matrix.npy'), test_cm)
+        np.save(os.path.join(args.res_dir, 'test_confusion_matrix_px.npy'), test_cm_px)
         print('best model, test: ' + format_res(res['test']), flush= True)
     with open(os.path.join(args.res_dir, 'results.json'), 'w') as f:
         json.dump(res, f, indent= 2)
@@ -330,3 +369,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# TODO: try to fight overfitting by increasing weight decay and dropout, implement ECE and NLL, use weight and biases to track performance
+# rerun same experiment with same seed and compare results
