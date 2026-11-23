@@ -14,7 +14,7 @@ class ParcelDataset(Dataset):
         acq_type= 'clear', bands= ('B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'), 
         temp_var= 'cgdd',
         band_stats= None, time_stats= None,
-        ignore_index= 0,
+        ignore_index= None,
         min_px= 1, min_purity= 0.0, drop_overlay= False, drop_invalid= True,
         min_clear_frac= 0.0,
         max_seq_len= 24, use_temp_calendar= False,
@@ -290,6 +290,7 @@ class ParcelDataset(Dataset):
             'year_idx': y_idx,
             'parcel_id': y_parcels['ids'][p_idx],
             'label': torch.tensor(y_parcels['labels'][p_idx]),
+            'n_px': torch.tensor(n_px),
             'timestamps': torch.from_numpy(res_timestamps),
             'band_vals': torch.from_numpy(res_band_vals),
             'mask': torch.from_numpy(mask)
@@ -303,6 +304,8 @@ class ParcelDataset(Dataset):
         return np.concatenate([y['p']['labels'] for y in self.y_data])
 
     def get_class_counts(self):
+        if self.ignore_index is not None:
+            return np.bincount(self.labels[self.labels != self.ignore_index], minlength= self.num_classes)
         return np.bincount(self.labels, minlength= self.num_classes)
 
     def get_class_weights(self, beta= 0.9):
@@ -313,7 +316,8 @@ class ParcelDataset(Dataset):
             np.ndarray: Class weights
         """
         class_counts = self.get_class_counts()
-        class_counts[self.ignore_index] = 0
+        if self.ignore_index is not None:
+            class_counts[self.ignore_index] = 0
 
         if beta == 1.0:
             weights = 1.0 / (class_counts + 1e-6)
@@ -324,7 +328,8 @@ class ParcelDataset(Dataset):
 
         missing = class_counts == 0
         weights[missing] = 1e-6
-        weights[self.ignore_index] = 0
+        if self.ignore_index is not None:
+            weights[self.ignore_index] = 0
 
         weights = weights / np.sum(weights) * self.num_classes
 
