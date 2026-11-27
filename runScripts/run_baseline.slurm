@@ -13,7 +13,7 @@ module load apptainer
 cd $HOME/SwissCrop25
 export OMP_NUM_THREADS=1
 
-apptainer exec --nv conda.sif python train.py \
+apptainer exec --nv conda.sif python src/train.py \
     --res_dir storage/baseline/tmp \
     --num_workers $((SLURM_CPUS_PER_TASK - 1)) \
     --use_temp_calendar --use_temp_subsampling \

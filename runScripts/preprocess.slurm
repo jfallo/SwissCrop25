@@ -14,4 +14,4 @@ cd $HOME/SwissCrop25/data
 sha256sum -c SwissCrop25-ParcelTS.tar.sha256
 
 cd ..
-apptainer exec conda.sif python ./preprocess.py
+apptainer exec conda.sif python src/preprocess.py
