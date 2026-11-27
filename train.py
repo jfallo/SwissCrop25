@@ -14,7 +14,7 @@ from dataset import ParcelDataset
 from src.tsvit.TSViTcls import TSViT
 
 
-parser = argparse.ArgumentParser(description="TSViT baseline for T3S crop mapping")
+parser = argparse.ArgumentParser(description= "TSViT baseline for T3S crop mapping")
 
 # model config
 parser.add_argument('--img_res', default= 1, type= int,
@@ -41,7 +41,6 @@ parser.add_argument('--acq_type', type= str, default= 'clear', choices= ['clear'
 parser.add_argument('--bands', type= str, nargs= '+', 
                     default= ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'])
 parser.add_argument('--temp_var', type= str, default= 'cgdd', choices= ['cgdd', 'cgdd_seasonal'])
-parser.add_argument('--ignore_index', type= int, default= None)
 parser.add_argument('--min_px', type= int, default= 1)
 parser.add_argument('--min_purity', type= float, default= 0.0)
 parser.add_argument('--drop_overlay', action= 'store_true')
@@ -53,6 +52,8 @@ parser.add_argument('--max_seq_len', type= int, default= 24)
 parser.add_argument('--use_temp_calendar', action= 'store_true')
 parser.add_argument('--use_temp_subsampling', action= 'store_true')
 parser.add_argument('--use_random_subsampling', action= 'store_true')
+parser.add_argument('--ignore_background', action= 'store_true',
+                    help= "Ignore background class when computing evaluation metrics.")
 #parser.add_argument('--use_fixed_temperature_subsampling', action= 'store_true')
 #parser.add_argument('--use_upsampling', action= 'store_true')
 parser.add_argument('--no_normalize_timestamps', action= 'store_true')
@@ -123,11 +124,11 @@ def build_input(batch, device):
     return x.to(device, non_blocking= True), y.to(device, non_blocking= True)
 
 
-def compute_metrics(confusion_matrix, ignore_index):
-    """Confusion matrix (rows = true, cols = predicted) -> OA, mIoU, mF1. mIoU and mF1 average over classes present in the ground truth."""
+def compute_metrics(confusion_matrix, ignore_background= False):
+    """Confusion matrix (rows = true, cols = predicted) for OA, mIoU, mF1."""
     confusion_matrix = confusion_matrix.copy()
-    if ignore_index is not None:
-        confusion_matrix[ignore_index, :] = 0
+    if ignore_background:
+        confusion_matrix[0, :] = 0
     
     tp = np.diag(confusion_matrix)
     fp = confusion_matrix.sum(axis= 0) - tp
@@ -135,22 +136,19 @@ def compute_metrics(confusion_matrix, ignore_index):
     support = confusion_matrix.sum(axis= 1)
 
     valid = support > 0
-    if ignore_index is not None:
-        valid[ignore_index] = False 
     if not valid.any():
-        return {'OA': 0.0, 'IoU': 0.0, 'mIoU': 0.0, 'mF1': 0.0}
+        return {'OA': 0.0, 'mIoU': 0.0, 'mF1': 0.0}
     
     oa = float(tp[valid].sum() / support[valid].sum())
     iou = tp / np.maximum(tp + fp + fn, 1e-8)
     f1 = 2 * tp / np.maximum(2 * tp + fp + fn, 1e-8)
     
-    return {'OA': oa, 'IoU': oa / (2 - oa), 'mIoU': float(iou[valid].mean()), 'mF1': float(f1[valid].mean())}
+    return {'OA': oa, 'mIoU': float(iou[valid].mean()), 'mF1': float(f1[valid].mean())}
 
 
 # TODO: ignore background label in confusion matrix, save confusion matrix (weight by n_px to compare against paper?)
 @torch.no_grad()
 def evaluate(model, loader, class_weights, args, device, num_classes):
-    ignore_index = args.ignore_index if args.ignore_index is not None else -100
     model.eval()
 
     confusion_matrix    = torch.zeros(num_classes**2, dtype= torch.float64, device= device)
@@ -167,23 +165,22 @@ def evaluate(model, loader, class_weights, args, device, num_classes):
         n_px = batch['n_px'][batch['mask'].any(dim= 1)].to(device)
         
         logits = model(x)
-        loss += F.cross_entropy(logits, y, weight= class_weights, ignore_index= ignore_index, reduction= 'sum')
+        loss += F.cross_entropy(logits, y, weight= class_weights, reduction= 'sum')
 
-        valid = (y != ignore_index)
-        norm += class_weights[y[valid]].sum() if class_weights is not None else valid.sum()
+        norm += class_weights[y].sum() if class_weights is not None else len(y)
 
-        preds = logits.argmax(dim= 1)[valid]
-        idxs = y[valid] * num_classes + preds
+        preds = logits.argmax(dim= 1)
+        idxs = y * num_classes + preds
         
         confusion_matrix += torch.bincount(idxs, minlength= num_classes**2)
-        confusion_matrix_px += torch.bincount(idxs, weights= n_px[valid], minlength= num_classes**2)
+        confusion_matrix_px += torch.bincount(idxs, weights= n_px, minlength= num_classes**2)
 
     confusion_matrix, confusion_matrix_px = (m.view(num_classes, num_classes).cpu().numpy() 
                                              for m in (confusion_matrix, confusion_matrix_px))
     
-    res = compute_metrics(confusion_matrix, args.ignore_index)
-    res.update({f'{key}_px': val for key, val in compute_metrics(confusion_matrix_px, args.ignore_index).items()})
-    res.update({'loss': float(loss / norm), 'n': float(confusion_matrix.sum())})
+    res = compute_metrics(confusion_matrix, args.ignore_background)
+    res.update({f'{key}_px': val for key, val in compute_metrics(confusion_matrix_px, args.ignore_background).items()})
+    res.update({'loss': float(loss / norm), 'n': int(confusion_matrix.sum())})
 
     return res, confusion_matrix, confusion_matrix_px
 
@@ -194,7 +191,6 @@ def format_res(m):
 
     
 def iterate(model, optimizer, scheduler, loader, class_weights, args, device, epoch, batches_per_epoch):
-    ignore_index = args.ignore_index if args.ignore_index is not None else -100
     model.train()
     optimizer.zero_grad()
     
@@ -206,7 +202,7 @@ def iterate(model, optimizer, scheduler, loader, class_weights, args, device, ep
         x, y = build_input(batch, device)
         if x is not None:
             logits = model(x)
-            batch_loss = F.cross_entropy(logits, y, weight= class_weights, ignore_index= ignore_index)
+            batch_loss = F.cross_entropy(logits, y, weight= class_weights)
             (batch_loss / args.accumulate_steps).backward()
             loss += batch_loss.detach()
             n += 1
@@ -247,7 +243,6 @@ def main():
     dataset_config = dict(
         acq_type= args.acq_type, bands= tuple(args.bands),
         temp_var= args.temp_var,
-        ignore_index= args.ignore_index,
         min_px= args.min_px, min_purity= args.min_purity,
         drop_overlay= args.drop_overlay, drop_invalid= not args.keep_invalid,
         min_clear_frac= args.min_clear_frac,
@@ -298,7 +293,6 @@ def main():
     
     batches_per_epoch = min(len(train_loader), args.debug_steps) if args.debug_steps else len(train_loader)
     total_steps = args.epochs * math.ceil(batches_per_epoch / args.accumulate_steps)
-    # changed to tom's (before was almost identical)
     warmup_steps = max(1, int(args.pct_start * total_steps))
     scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer,
@@ -370,5 +364,4 @@ def main():
 if __name__ == '__main__':
     main()
 
-# TODO: try to fight overfitting by increasing weight decay and dropout, implement ECE and NLL, use weight and biases to track performance
-# rerun same experiment with same seed and compare results
+# TODO: use "weight and biases" to track performance, rerun same experiment with same seed and compare results

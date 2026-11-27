@@ -14,11 +14,10 @@ class ParcelDataset(Dataset):
         acq_type= 'clear', bands= ('B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'), 
         temp_var= 'cgdd',
         band_stats= None, time_stats= None,
-        ignore_index= None,
         min_px= 1, min_purity= 0.0, drop_overlay= False, drop_invalid= True,
         min_clear_frac= 0.0,
         max_seq_len= 24, use_temp_calendar= False,
-        use_temp_subsampling= False,    # sliding window when false
+        use_temp_subsampling= False,  # sliding window when false
         use_random_subsampling= False,
         normalize_timestamps= True,
         seed= 42, training= False, verbose= False
@@ -31,7 +30,6 @@ class ParcelDataset(Dataset):
         self.band_stats           = band_stats
         self.time_stats           = time_stats
         self.normalize_timestamps = normalize_timestamps
-        self.ignore_index         = ignore_index
         # parcel filters
         self.min_px               = min_px
         self.min_purity           = min_purity
@@ -221,14 +219,13 @@ class ParcelDataset(Dataset):
         elif len(valid) <= self.max_seq_len:
             return valid, np.arange(len(valid), dtype= np.int64)
 
-        if self.use_random_subsampling and self.training:
+        if self.use_temp_subsampling:
+            obs, loc = self._T3S(valid, cgdd, clear_frac)
+        elif self.use_random_subsampling and self.training:
             obs = np.sort(np.random.choice(valid, self.max_seq_len, replace= False))
             loc = np.arange(len(obs), dtype= np.int64)
         else:
-            if self.use_temp_subsampling:
-                obs, loc = self._T3S(valid, cgdd, clear_frac)
-            else:
-                obs, loc = self._sliding_window(valid, clear_frac)
+            obs, loc = self._sliding_window(valid, clear_frac)
 
         return obs, loc
 
@@ -304,35 +301,22 @@ class ParcelDataset(Dataset):
         return np.concatenate([y['p']['labels'] for y in self.y_data])
 
     def get_class_counts(self):
-        if self.ignore_index is not None:
-            return np.bincount(self.labels[self.labels != self.ignore_index], minlength= self.num_classes)
         return np.bincount(self.labels, minlength= self.num_classes)
 
     def get_class_weights(self, beta= 0.9):
-        """Calculate class weights using effective number of samples.
-        Args:
-            beta: Hyperparameter for effective number calculation
-        Returns:
-            np.ndarray: Class weights
-        """
+        """Calculate class weights using effective number of samples. (beta: effective number hyperparameter)"""
         class_counts = self.get_class_counts()
-        if self.ignore_index is not None:
-            class_counts[self.ignore_index] = 0
-
+        
         if beta == 1.0:
             weights = 1.0 / (class_counts + 1e-6)
         else:
             eff = 1.0 - np.power(beta, class_counts)
             eff[eff <= 0] = 1e-6
             weights = (1.0 - beta) / eff
-
-        missing = class_counts == 0
-        weights[missing] = 1e-6
-        if self.ignore_index is not None:
-            weights[self.ignore_index] = 0
-
+        
+        weights[class_counts == 0] = 1e-6
         weights = weights / np.sum(weights) * self.num_classes
-
+        
         return weights.astype(np.float32)
     
     
@@ -396,3 +380,5 @@ class ParcelDataset(Dataset):
         std = np.sqrt(np.maximum(ss / n_obs - mean ** 2, 1e-8))
         
         return {'mean': mean, 'std': std, 'from_n_obs': n_obs}
+
+# TODO: run a test for different max seq lengths

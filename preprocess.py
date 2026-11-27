@@ -117,7 +117,7 @@ def process_obs_batch(b, kept_ids, window, num_days):
 
 
 def load_and_cache_year(tar, year, args, target_map, acq_types, s2_bands):
-    out_path = os.path.join(args.out_dir, str(year))
+    out_path = os.path.join(args.cache_dir, str(year))
     os.makedirs(out_path, exist_ok= True)
     os.makedirs(os.path.join(out_path, 'observations'), exist_ok= True)
 
@@ -243,7 +243,7 @@ def load_and_cache_year(tar, year, args, target_map, acq_types, s2_bands):
 
 def main(args):
     label_map, target_map, num_classes = map_lnf_codes_to_labels(args.label_sheet, args.label_col)
-    with open(os.path.join(args.out_dir, 'label_map.json'), 'w') as f:
+    with open(os.path.join(args.cache_dir, 'label_map.json'), 'w') as f:
         json.dump(label_map, f)
 
     acq_types = ['clear'] if args.only_clear_px else ['clear', 'all']
@@ -266,7 +266,7 @@ def main(args):
         'cl_data': CL_DATA,
         'p_data': P_DATA
     }
-    with open(os.path.join(args.out_dir, 'meta.json'), 'w') as f:
+    with open(os.path.join(args.cache_dir, 'meta.json'), 'w') as f:
         json.dump(meta, f, indent= 2)
 
 
@@ -288,9 +288,9 @@ if __name__ == "__main__":
                         default= ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B11', 'B12'])
     parser.add_argument('--only_clear_px', action= 'store_true',
                         help= "Only include cloud-free observations.")
-    parser.add_argument('--out_dir', type= str, default= 'data/cache/',
+    parser.add_argument('--cache_dir', type= str, default= 'data/cache/',
                         help= "Output directory for caches.")
     args = parser.parse_args()
     
-    os.makedirs(args.out_dir, exist_ok= True)
+    os.makedirs(args.cache_dir, exist_ok= True)
     main(args)
