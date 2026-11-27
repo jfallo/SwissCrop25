@@ -24,7 +24,8 @@ core_*
 *.parquet
 *.tar
 *.tar.sha256
-*.npy
+data/*.npy
+data/**/*.npy
 data/*.json
 data/**/*.json
 
