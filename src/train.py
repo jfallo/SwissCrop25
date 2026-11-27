@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from dataset import ParcelDataset
-from src.tsvit.TSViTcls import TSViT
+from tsvit.TSViTcls import TSViT
 
 
 parser = argparse.ArgumentParser(description= "TSViT baseline for T3S crop mapping")

@@ -34,13 +34,12 @@ def load_class_info(cache_dir, label_sheet, label_col):
         df = df[df['Exclude'] != True]
     df = df.drop_duplicates(subset= label_col, keep= 'first').reset_index(drop= True)
 
-    # get label indexes from label map
+    # get label index from label map
     with open(os.path.join(cache_dir, 'label_map.json')) as f:
         label_map = json.load(f)
     df['class_idx'] = df[label_col].astype(str).map(label_map).astype(int)
 
-    df['lv3'] = df['Crop_Label_lv3'].fillna(df['Crop_Label_lv2'])
-    df = df.rename(columns= {label_col: 'label'})
+    df['Crop_Label_lv3'] = df['Crop_Label_lv3'].fillna(df['Crop_Label_lv2'])
 
     return df
 
@@ -49,9 +48,7 @@ def sort_order(df):
     """Return list of class indices sorted by lv3 (GROUP_ORDER) → lv2 → lv1 → LNF_code."""
     rows = []
     for grp in GROUP_ORDER:
-        sub = df[df['lv3'] == grp].sort_values(
-            ['Crop_Label_lv2', 'Crop_Label_lv1', 'LNF_code']
-        )
+        sub = df[df['Crop_Label_lv3'] == grp].sort_values(['Crop_Label_lv2', 'Crop_Label_lv1', 'LNF_code'])
         rows.append(sub)
     ordered = pd.concat(rows, ignore_index= True)
     
@@ -61,7 +58,7 @@ def sort_order(df):
 def group_boundaries(df):
     """Return list of (start, end, group_name) for divider lines."""
     bounds, prev_grp, start = [], None, 0
-    for i, grp in enumerate(df['lv3']):
+    for i, grp in enumerate(df['Crop_Label_lv3']):
         if grp != prev_grp:
             if prev_grp is not None:
                 bounds.append((start, i, prev_grp))
@@ -77,6 +74,8 @@ def row_normalise(cm, idx):
     row_sums = cm[idx].sum(axis= 1, keepdims= True)
     out = np.divide(sub, row_sums, out= np.full_like(sub, np.nan), where= row_sums > 0) * 100
     return out
+
+
 
 
 TICK_FS  = 12.0  # class label fontsize
@@ -155,11 +154,12 @@ def make_single_figure(cm_n, df, class_labels):
 def main():
     parser = argparse.ArgumentParser(description= "Confusion matrix figures from train.py outputs.")
     parser.add_argument('--run', required= True,
-                        help= "Visualizes the confusion matrix for this run.")
+                        help= "Visualizes the confusion matrix for given run.")
     parser.add_argument('--split', choices= ['val', 'test'], default= 'test')
-    parser.add_argument('--px', action= 'store_true', help= 'Use the pixel-weighted confusion matrix.')
+    parser.add_argument('--px', action= 'store_true', 
+                        help= "Use pixel-weighted confusion matrix.")
     parser.add_argument('--cache_dir', default= 'data/cache', 
-                        help="Dir with label_map.json.")
+                        help= "Location of label_map.json.")
     parser.add_argument('--label_sheet', default= 'data/SwissCrop25_label_sheet.xlsx')
     parser.add_argument('--label_col', default= 'Crop_Label')
     args = parser.parse_args()
@@ -167,16 +167,15 @@ def main():
     
     df = load_class_info(args.cache_dir, args.label_sheet, args.label_col)
     idx_order, ordered_df = sort_order(df)
-    class_labels = ordered_df['label'].tolist()
+    class_labels = ordered_df[args.label_col].tolist()
 
     fname = f"{args.split}_confusion_matrix{'_px' if args.px else ''}"
+    
     cm = np.load(os.path.join(args.run, f'{fname}.npy')).astype(np.float64)
+    cm = row_normalise(cm, idx_order)
 
-    cm_n = row_normalise(cm, idx_order)
-    acc = np.nanmean(np.diag(cm_n))
-    print(f"mean recall = {acc:.1f}%")
-
-    fig = make_single_figure(cm_n, ordered_df, class_labels)
+    print(f"Average recall: {np.nanmean(np.diag(cm)):.1f}%")
+    fig = make_single_figure(cm, ordered_df, class_labels)
     out_path = os.path.join(args.run, f'{fname}.pdf')
     fig.savefig(out_path, dpi= 200, bbox_inches= 'tight')
     plt.close(fig)
