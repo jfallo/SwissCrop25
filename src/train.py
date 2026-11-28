@@ -1,14 +1,12 @@
 import argparse
-import time
-import random
-import os
-import json
-import math
+import os, json
+import time, math, random, uuid
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import wandb
 
 from dataset import ParcelDataset
 from tsvit.TSViTcls import TSViT
@@ -47,14 +45,11 @@ parser.add_argument('--drop_overlay', action= 'store_true')
 parser.add_argument('--keep_invalid', action= 'store_true')
 parser.add_argument('--min_clear_frac', type= float, default= 0.0)
 parser.add_argument('--max_seq_len', type= int, default= 24)
-#parser.add_argument('--use_gdd_pe', action= 'store_true',
-#                    help= "Use z-scored CGDD as temporal PE instead of DOY.")
 parser.add_argument('--use_temp_calendar', action= 'store_true')
 parser.add_argument('--use_temp_subsampling', action= 'store_true')
 parser.add_argument('--use_random_subsampling', action= 'store_true')
 parser.add_argument('--ignore_background', action= 'store_true',
                     help= "Ignore background class when computing evaluation metrics.")
-#parser.add_argument('--use_fixed_temperature_subsampling', action= 'store_true')
 #parser.add_argument('--use_upsampling', action= 'store_true')
 parser.add_argument('--no_normalize_timestamps', action= 'store_true')
 
@@ -76,10 +71,16 @@ parser.add_argument('--lr', type= float, default= 1e-3)
 parser.add_argument('--lr_start', type= float, default= 1e-4)
 parser.add_argument('--lr_end', type= float, default= 1e-7)
 parser.add_argument('--weight_decay', type= float, default= 0.01)
-#parser.add_argument('--lr_reference_batch_size', type=int, default=0,
-#                    help='if >0: scale lr by effective_batch / this (the tile script uses 64 tiles); 0 = off')
 parser.add_argument('--val_every', type= int, default= 1)
 parser.add_argument('--select_metric', type= str, default= 'mIoU', choices= ['OA', 'mIoU', 'mF1'])
+parser.add_argument('--use_class_balance_loss', action= 'store_true')
+parser.add_argument('--beta_class_balance', default= 0.9999, type= float)
+parser.add_argument('--wandb', action= 'store_true')
+parser.add_argument('--wandb_project', type= str, default= 'crop-mapping')
+parser.add_argument('--wandb_group', type= str, default= None)
+parser.add_argument('--wandb_name', type= str, default= None)
+parser.add_argument('--wandb_tags', type= str, nargs= '*', default= None)
+parser.add_argument('--wandb_mode', type= str, default= 'offline', choices= ['online', 'offline', 'disabled'])
 
 # misc parameters
 parser.add_argument('--rdm_seed', type= int, default= 6666)
@@ -88,19 +89,6 @@ parser.add_argument('--device', type= str, default= 'cuda')
 parser.add_argument('--display_step', type= int, default= 500)
 parser.add_argument('--eval_only', action= 'store_true', 
                     help= "Skip training, test res_dir/model.pth")
-
-# loss parameters
-parser.add_argument('--use_class_balance_loss', action= 'store_true')
-parser.add_argument('--beta_class_balance', default= 0.9999, type= float)
-parser.add_argument('--w_ce', default= 1.0, type= float)
-parser.add_argument('--w_focal', default= 0.0, type= float)
-parser.add_argument('--w_dice', default= 0.0, type= float)
-parser.add_argument('--w_logcosh_dice', default= 0.0, type= float)
-parser.add_argument('--w_kl', default= 0.0, type= float)
-parser.add_argument('--focal_gamma', default= 2.0, type= float)
-parser.add_argument('--w_tversky', default= 0.0, type= float)
-parser.add_argument('--tversky_alpha', default= 0.3, type= float)
-parser.add_argument('--tversky_beta', default= 0.7, type= float)
 
 
 def build_input(batch, device):
@@ -179,7 +167,7 @@ def evaluate(model, loader, class_weights, args, device, num_classes):
                                              for m in (confusion_matrix, confusion_matrix_px))
     
     res = compute_metrics(confusion_matrix, args.ignore_background)
-    res.update({f'{key}_px': val for key, val in compute_metrics(confusion_matrix_px, args.ignore_background).items()})
+    res.update({f'{k}_px': v for k, v in compute_metrics(confusion_matrix_px, args.ignore_background).items()})
     res.update({'loss': float(loss / norm), 'n': int(confusion_matrix.sum())})
 
     return res, confusion_matrix, confusion_matrix_px
@@ -214,8 +202,18 @@ def iterate(model, optimizer, scheduler, loader, class_weights, args, device, ep
             optimizer.zero_grad()
 
         if (step + 1) % args.display_step == 0:
-            print(f'  epoch {epoch + 1} step {step + 1}/{batches_per_epoch} | loss {float(loss) / max(n, 1):.4f} | '
-                  f'lr {scheduler.get_last_lr()[0]:.2e} | {(step + 1) * args.batch_size / (time.time() - t0):,.0f} parcels/s', flush= True)
+            running_loss = float(loss) / max(n, 1)
+            lr = scheduler.get_last_lr()[0]
+            throughput = (step + 1) * args.batch_size / (time.time() - t0)
+            print(f'  epoch {epoch + 1} step {step + 1}/{batches_per_epoch} | loss {running_loss:.4f} | '
+                  f'lr {lr:.2e} | {throughput:,.0f} parcels/s', flush= True)
+            if args.wandb:
+                wandb.log({
+                    'global_step': epoch * batches_per_epoch + step + 1,
+                    'train/loss': running_loss,
+                    'train/lr': lr,
+                    'train/throughput': throughput
+                })
     
     return float(loss) / max(n, 1)
 
@@ -235,6 +233,29 @@ def main():
     with open(os.path.join(args.res_dir, 'args.json'), 'w') as f:
         json.dump(vars(args), f, indent= 2)
     print(f'train {args.train_years} | val {args.val_years} | test {args.test_years}', flush= True)
+
+
+    # ------ Weights & Biases ------------------------------------ #
+
+    if args.wandb:
+        id_path = os.path.join(args.res_dir, 'wandb_id.txt')
+        if args.resume and os.path.exists(id_path):
+            run_id = open(id_path).read().strip()
+        else:
+            run_id = uuid.uuid4().hex[:8]
+            with open(id_path, 'w') as f:
+                f.write(run_id)
+
+        wandb.init(
+            project= args.wandb_project, group= args.wandb_group, name= args.wandb_name,
+            tags= args.wandb_tags, mode= args.wandb_mode, id= run_id, 
+            resume= 'allow', config= {**vars(args), 'effective_seed': seed}
+        )
+        wandb.define_metric('global_step')
+        wandb.define_metric('train/*', step_metric= 'global_step')
+        wandb.define_metric('epoch')
+        wandb.define_metric('val/*', step_metric= 'epoch')
+        wandb.define_metric('train_epoch/*', step_metric= 'epoch')
 
 
     # ------ Data ------------------------------------ #
@@ -286,11 +307,17 @@ def main():
     )
     model = TSViT(model_config).to(device)
     print(f'Model parameters: {sum(p.numel() for p in model.parameters()):,}', flush= True)
+    
+    if args.wandb:
+        wandb.config.update({
+            'n_params': sum(p.numel() for p in model.parameters()),
+            'n_train': len(train_ds),
+            'n_val': len(val_ds),
+            'num_classes': num_classes
+        }, allow_val_change= True)
 
     class_weights = torch.tensor(train_ds.get_class_weights(args.beta_class_balance), device= device) if args.use_class_balance_loss else None
-    
     optimizer = torch.optim.AdamW(model.parameters(), lr= args.lr, weight_decay= args.weight_decay)
-    
     batches_per_epoch = min(len(train_loader), args.debug_steps) if args.debug_steps else len(train_loader)
     total_steps = args.epochs * math.ceil(batches_per_epoch / args.accumulate_steps)
     warmup_steps = max(1, int(args.pct_start * total_steps))
@@ -330,14 +357,32 @@ def main():
             t0 = time.time()
             train_loss = iterate(model, optimizer, scheduler, train_loader, class_weights, 
                                  args, device, epoch, batches_per_epoch)
+            
             print(f'epoch {epoch + 1}/{args.epochs} | train loss {train_loss:.4f} | {(time.time() - t0) / 60:.1f} min', flush= True)
+            if args.wandb:
+                wandb.log({
+                    'epoch': epoch + 1,
+                    'train_epoch/loss': train_loss,
+                    'train_epoch/mins': (time.time() - t0) / 60
+                })
+            
             if (epoch + 1) % args.val_every == 0 or epoch + 1 == args.epochs:
                 val, _, _ = evaluate(model, val_loader, class_weights, args, device, num_classes)
-                print('  val: ' + format_res(val), flush= True)
+                
                 history.append({'epoch': epoch + 1, 'train_loss': train_loss, **val})
+                print('  val: ' + format_res(val), flush= True)
+                
                 if val[args.select_metric] > best:
                     best = val[args.select_metric]
                     torch.save(model.state_dict(), best_path)
+
+                if args.wandb:
+                    wandb.log({
+                        'epoch': epoch + 1,
+                        **{f'val/{k}': v for k, v in val.items()},
+                        f'val/best_{args.select_metric}': best
+                    })
+
             torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                         'scheduler': scheduler.state_dict(), 'epoch': epoch, 'best': best, 'history': history}, latest_path)
 
@@ -358,10 +403,25 @@ def main():
     with open(os.path.join(args.res_dir, 'results.json'), 'w') as f:
         json.dump(res, f, indent= 2)
 
+    if args.wandb:
+        for split in ('val', 'test'):
+            if split in res:
+                for k, v in res[split].items():
+                    wandb.summary[f'final/{split}/{k}'] = v
+        wandb.summary[f'best_val_{args.select_metric}'] = best
+
+        artifact = wandb.Artifact(f'results-{wandb.run.id}', type= 'results')
+        for f in os.listdir(args.res_dir):
+            if f.endswith(('.npy', '.json')):
+                artifact.add_file(os.path.join(args.res_dir, f))
+        wandb.log_artifact(artifact)
+
+        wandb.finish()
+
 
 
 
 if __name__ == '__main__':
     main()
 
-# TODO: use "weight and biases" to track performance, rerun same experiment with same seed and compare results
+# TODO: rerun same experiment with same seed and compare results
